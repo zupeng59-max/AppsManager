@@ -46,20 +46,22 @@ import java.util.Map;
 
 public class MainActivity extends Activity {
     private static final String PREFS_NAME = "launcher_preferences";
+    private static final String PREF_CATEGORY_SCHEMA_VERSION = "category_schema_version";
+    private static final int CATEGORY_SCHEMA_VERSION = 2;
     private static final String CATEGORY_ALL = "全部";
     private static final String CATEGORY_FAVORITES = "常用";
     private static final String CATEGORY_HIDDEN = "隐藏";
     private static final List<String> CATEGORIES = Arrays.asList(
             CATEGORY_ALL,
             CATEGORY_FAVORITES,
+            "游戏",
+            "娱乐",
             "AI",
             "学习",
-            "娱乐",
             "社交",
             "支付",
             "购物",
             "出行",
-            "工具",
             "其他",
             CATEGORY_HIDDEN
     );
@@ -224,6 +226,7 @@ public class MainActivity extends Activity {
 
     private void loadApps() {
         List<AppEntry> nextApps = new ArrayList<>();
+        boolean shouldMigrateCategories = preferences.getInt(PREF_CATEGORY_SCHEMA_VERSION, 1) < CATEGORY_SCHEMA_VERSION;
         Intent launcherIntent = new Intent(Intent.ACTION_MAIN, null);
         launcherIntent.addCategory(Intent.CATEGORY_LAUNCHER);
 
@@ -250,10 +253,14 @@ public class MainActivity extends Activity {
             String label = resolveInfo.loadLabel(packageManager).toString();
             Drawable icon = resolveInfo.loadIcon(packageManager);
             AppEntry app = new AppEntry(label, packageName, activityName, icon);
-            app.category = preferences.getString(categoryKey(app), inferCategory(app));
+            app.category = resolveCategory(app, shouldMigrateCategories);
             app.favorite = preferences.getBoolean(favoriteKey(app), false);
             app.hidden = preferences.getBoolean(hiddenKey(app), false);
             nextApps.add(app);
+        }
+
+        if (shouldMigrateCategories) {
+            preferences.edit().putInt(PREF_CATEGORY_SCHEMA_VERSION, CATEGORY_SCHEMA_VERSION).apply();
         }
 
         Collections.sort(nextApps, (left, right) -> {
@@ -428,7 +435,10 @@ public class MainActivity extends Activity {
                 .setTitle("修改分类：" + app.label)
                 .setSingleChoiceItems(editableCategories.toArray(new String[0]), checkedIndex, (dialog, which) -> {
                     app.category = editableCategories.get(which);
-                    preferences.edit().putString(categoryKey(app), app.category).apply();
+                    preferences.edit()
+                            .putString(categoryKey(app), app.category)
+                            .putBoolean(manualCategoryKey(app), true)
+                            .apply();
                     selectedCategory = app.category;
                     dialog.dismiss();
                     reloadAfterChange();
@@ -443,6 +453,16 @@ public class MainActivity extends Activity {
         startActivity(intent);
     }
 
+    private String resolveCategory(AppEntry app, boolean shouldMigrateCategories) {
+        boolean hasManualCategory = preferences.getBoolean(manualCategoryKey(app), false);
+        String savedCategory = preferences.getString(categoryKey(app), null);
+
+        if (savedCategory == null || shouldMigrateCategories && !hasManualCategory) {
+            return inferCategory(app);
+        }
+        return normalizeCategory(savedCategory);
+    }
+
     private void reloadAfterChange() {
         loadApps();
         renderCategoryChips();
@@ -452,29 +472,37 @@ public class MainActivity extends Activity {
 
     private String inferCategory(AppEntry app) {
         String text = (app.label + " " + app.packageName).toLowerCase(Locale.ROOT);
+        if (containsAny(text, "game", "games", "gaming", "mihoyo", "hoyoverse", "tencent.tmgp", "netease", "steam", "epic", "pubg", "honorofkings", "lolm", "minecraft", "genshin", "starrail", "brawl", "roblox", "pokemon", "gamecenter", "游戏", "手游", "王者荣耀", "和平精英", "原神", "崩坏", "星穹铁道", "我的世界", "蛋仔", "阴阳师", "第五人格", "明日方舟", "金铲铲", "英雄联盟", "元梦之星")) {
+            return "游戏";
+        }
         if (containsAny(text, "chatgpt", "openai", "claude", "gemini", "deepseek", "kimi", "豆包", "通义", "文心", "ai")) {
             return "AI";
         }
-        if (containsAny(text, "bilibili", "douyin", "kuaishou", "xiaohongshu", "youtube", "iqiyi", "youku", "netflix", "music", "哔哩", "抖音", "快手", "小红书", "视频", "音乐", "爱奇艺", "优酷")) {
+        if (containsAny(text, "bilibili", "douyin", "kuaishou", "xiaohongshu", "youtube", "iqiyi", "youku", "netflix", "music", "spotify", "podcast", "player", "哔哩", "抖音", "快手", "小红书", "视频", "音乐", "爱奇艺", "优酷", "腾讯视频", "网易云", "酷狗", "酷我", "喜马拉雅")) {
             return "娱乐";
         }
-        if (containsAny(text, "wechat", "qq", "weibo", "telegram", "whatsapp", "instagram", "微信", "微博", "社交")) {
+        if (containsAny(text, "wechat", "qq", "weibo", "telegram", "whatsapp", "instagram", "facebook", "twitter", "xhs", "discord", "line", "snapchat", "微信", "微博", "社交", "聊天", "知乎", "贴吧")) {
             return "社交";
         }
-        if (containsAny(text, "alipay", "unionpay", "bank", "wallet", "支付", "银行", "云闪付")) {
+        if (containsAny(text, "alipay", "unionpay", "bank", "wallet", "pay", "finance", "支付", "银行", "云闪付", "钱包", "工商银行", "建设银行", "招商银行", "农业银行", "中国银行")) {
             return "支付";
         }
-        if (containsAny(text, "taobao", "jd", "pdd", "amazon", "shop", "淘宝", "京东", "拼多多", "闲鱼", "购物")) {
+        if (containsAny(text, "taobao", "jd", "pdd", "amazon", "shop", "mall", "tmall", "meituan", "eleme", "淘宝", "京东", "拼多多", "闲鱼", "购物", "天猫", "美团", "饿了么", "得物")) {
             return "购物";
         }
-        if (containsAny(text, "amap", "baidu.map", "didi", "ctrip", "railway", "travel", "map", "高德", "地图", "滴滴", "携程", "铁路", "出行")) {
+        if (containsAny(text, "amap", "baidu.map", "didi", "ctrip", "railway", "travel", "map", "flight", "taxi", "高德", "地图", "滴滴", "携程", "铁路", "出行", "12306", "航旅", "公交", "地铁")) {
             return "出行";
         }
-        if (containsAny(text, "study", "course", "classroom", "duolingo", "anki", "cet", "学习", "课程", "考试", "单词")) {
+        if (containsAny(text, "study", "course", "classroom", "duolingo", "anki", "cet", "learn", "school", "mooc", "notion", "obsidian", "学习", "课程", "考试", "单词", "作业", "课堂", "大学", "慕课", "词典", "翻译")) {
             return "学习";
         }
-        if (containsAny(text, "settings", "calculator", "calendar", "browser", "files", "tool", "设置", "计算器", "日历", "浏览器", "文件", "工具", "备忘")) {
-            return "工具";
+        return "其他";
+    }
+
+    private String normalizeCategory(String category) {
+        List<String> editableCategories = CATEGORIES.subList(2, CATEGORIES.size() - 1);
+        if (editableCategories.contains(category)) {
+            return category;
         }
         return "其他";
     }
@@ -490,6 +518,10 @@ public class MainActivity extends Activity {
 
     private String categoryKey(AppEntry app) {
         return "category:" + app.key();
+    }
+
+    private String manualCategoryKey(AppEntry app) {
+        return "manual-category:" + app.key();
     }
 
     private String favoriteKey(AppEntry app) {
